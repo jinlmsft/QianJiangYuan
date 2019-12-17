@@ -1,4 +1,6 @@
 #!/usr/bin/python 
+# -*- coding: UTF-8 -*-
+
 import json
 import os
 import time
@@ -23,6 +25,10 @@ import base64
 from shutil import copyfile, copytree
 import urllib
 import socket,struct
+import logging
+
+sys.path.append("../utils")
+from MyLogger import get_deploy_logger as Logger
 
 
 verbose = False
@@ -42,20 +48,33 @@ def clean_rendered_target_directory():
 def render_template(template_file, target_file, config, verbose=False):
     filename, file_extension = os.path.splitext(template_file)
     basename = os.path.basename(template_file)
+
     if ("render-exclude" in config and basename in config["render-exclude"] ):
         # Don't render/copy the file. 
         return
+
     if ("render-by-copy-ext" in config and file_extension in config["render-by-copy-ext"]) or ("render-by-copy" in config and basename in config["render-by-copy"]):
+        
         copyfile(template_file, target_file)
+        Logger().cmd("copy file %s %s" % (template_file, target_file))
+
         if verbose:
             print "Copy tempalte " + template_file + " --> " + target_file
+
+        
     elif "render-by-copy-full" in config and template_file in config["render-by-copy-full"]:
+
         copyfile(template_file, target_file)
+        Logger().cmd("copy file %s %s" % (template_file, target_file))
+
         if verbose:
             print "Copy tempalte " + template_file + " --> " + target_file
+
     elif ("render-by-line-ext" in config and file_extension in config["render-by-line-ext"]) or ("render-by-line" in config and basename in config["render-by-line"]):
         if verbose:
             print "Render template " + template_file + " --> " + target_file + " Line by Line .... "
+        
+        ## 逐行拷贝
         ENV_local = Environment(loader=FileSystemLoader("/"))
         with open(target_file, 'w') as f:
             with open(template_file, 'r') as fr:
@@ -71,17 +90,26 @@ def render_template(template_file, target_file, config, verbose=False):
                 fr.close()
             f.close()
 
+        Logger().cmd("copy file %s %s" % (template_file, target_file))
+
     else:
         if verbose:
             print "Render template " + template_file + " --> " + target_file
         try:
             ENV_local = Environment(loader=FileSystemLoader("/"))
             template = ENV_local.get_template(os.path.abspath(template_file))
+
             content = template.render(cnf=config)
             target_dir = os.path.dirname(target_file)
-            os.system("mkdir -p {0}".format(target_dir))
+
+            cmd = "mkdir -p {0}".format(target_dir)
+            os.system(cmd)
+            Logger().cmd(cmd)
+            Logger().cmd("copy file %s %s" % (template_file, target_file))
+
             with open(target_file, 'w') as f:
                 f.write(content)
+
             f.close()
         except Exception as e:
             print "!!! Failure !!! in render template " + template_file
@@ -93,18 +121,25 @@ def render_template_directory(template_dir, target_dir,config, verbose=False, ex
         return
     else:
         StaticVariable.rendered_target_directory[target_dir]=template_dir
-        os.system("mkdir -p "+target_dir)
+
+        cmd = "mkdir -p "+target_dir
+        os.system(cmd)
+        Logger().cmd(cmd)
+
         markfile = os.path.join( target_dir, "DO_NOT_WRITE" )
         # print "Evaluate %s" % markfile
         if not os.path.exists( markfile ):
             # print "Write DO_NOT_WRITE"
             open( markfile, 'w').close()
+
         filenames = os.listdir(template_dir)
         for filename in filenames:
             if filename == "copy_dir":
                 fullname = os.path.join(template_dir, filename)
+
                 with open( fullname ) as f:
                     content = f.readlines()
+
                 content = [x.strip() for x in content]
                 for copy_dir in content:
                     fullname_copy_dir = os.path.join(template_dir, copy_dir)
@@ -112,18 +147,27 @@ def render_template_directory(template_dir, target_dir,config, verbose=False, ex
                     # Allow target directory to be re-rendered
                     StaticVariable.rendered_target_directory.pop(target_dir, None)
                     render_template_directory(fullname_copy_dir, target_dir,config, verbose, exclude_dir=template_dir)
+
             elif os.path.isfile(os.path.join(template_dir, filename)):
                 if exclude_dir is not None:
                     check_file = os.path.join(exclude_dir, filename)
                     if os.path.exists(check_file):
                         continue
+
                 render_template(os.path.join(template_dir, filename), os.path.join(target_dir, filename),config, verbose)
             else:
                 srcdir = os.path.join(template_dir, filename) 
                 dstdir = os.path.join(target_dir, filename)
+
                 if ("render-by-copy" in config and filename in config["render-by-copy"]):
-                    os.system( "rm -rf %s" % dstdir )
-                    os.system( "cp -r %s %s" %(srcdir, dstdir))
+                    cmd = "rm -rf %s" % dstdir
+                    os.system(cmd)
+                    Logger().cmd(cmd)
+
+                    cmd = "cp -r %s %s" %(srcdir, dstdir)
+                    os.system(cmd)
+                    Logger().cmd(cmd)
+
                 else:
                     if exclude_dir is None:
                         render_template_directory(srcdir, dstdir,config, verbose)
@@ -131,41 +175,55 @@ def render_template_directory(template_dir, target_dir,config, verbose=False, ex
                         exdir = os.path.join(exclude_dir, filename)
                         render_template_directory(srcdir, dstdir,config, verbose, exclude_dir=exdir)
 
+
 # Execute a remote SSH cmd with identity file (private SSH key), user, host
 def SSH_exec_cmd(identity_file, user,host,cmd,showCmd=True):
     if len(cmd)==0:
         return;
+    
     if showCmd or verbose:
         print ("""ssh -q -o "StrictHostKeyChecking no" -o "UserKnownHostsFile=/dev/null" -i %s "%s@%s" "%s" """ % (identity_file, user, host, cmd) ) 
-    os.system("""ssh -q -o "StrictHostKeyChecking no" -o "UserKnownHostsFile=/dev/null" -i %s "%s@%s" "%s" """ % (identity_file, user, host, cmd) )
+    
+    cmd = """ssh -q -o "StrictHostKeyChecking no" -o "UserKnownHostsFile=/dev/null" -i %s "%s@%s" "%s" """ % (identity_file, user, host, cmd) 
+    os.system(cmd)
+    Logger().cmd(cmd)
 
 # SSH Connect to a remote host with identity file (private SSH key), user, host
 # Program usually exit here. 
 def SSH_connect(identity_file, user,host):
     if verbose:
         print ("""ssh -q -o "StrictHostKeyChecking no" -o "UserKnownHostsFile=/dev/null" -i %s "%s@%s" """ % (identity_file, user, host) ) 
-    os.system("""ssh -q -o "StrictHostKeyChecking no" -o "UserKnownHostsFile=/dev/null" -i %s "%s@%s" """ % (identity_file, user, host) )
+
+    cmd = """ssh -q -o "StrictHostKeyChecking no" -o "UserKnownHostsFile=/dev/null" -i %s "%s@%s" """ % (identity_file, user, host) 
+    os.system(cmd)
+    Logger().cmd(cmd)
 
 # Copy a local file or directory (source) to remote (target) with identity file (private SSH key), user, host 
 def scp (identity_file, source, target, user, host, verbose = False):
     cmd = 'scp -q -o "StrictHostKeyChecking no" -o "UserKnownHostsFile=/dev/null" -i %s -r "%s" "%s@%s:%s"' % (identity_file, source, user, host, target)
     if verbose:
         print cmd
+
     os.system(cmd)
+    Logger().cmd(cmd)
 
 # Copy a local file (source) or directory to remote (target) with identity file (private SSH key), user, host, and  
 def sudo_scp (identity_file, source, target, user, host,changePermission=False, verbose = False ):
     tmp = str(uuid.uuid4())    
     scp(identity_file, source,"~/%s" % tmp, user, host, verbose )
     targetPath = os.path.dirname(target)
-    if ( os.path.isfile(source)):
+
+    if (os.path.isfile(source)):
         cmd = "sudo mkdir -p %s ; sudo mv ~/%s %s" % (targetPath, tmp, target)
     else:
-        cmd = "sudo mkdir -p %s ; sudo rm -r %s/*; sudo mv ~/%s/* %s; sudo rm -rf ~/%s" % (target, target, tmp, target, tmp)
+        cmd = "sudo mkdir -p %s ; sudo rm -rf %s/*; sudo mv ~/%s/* %s; sudo rm -rf ~/%s" % (target, target, tmp, target, tmp)
+    
     if changePermission:
         cmd += " ; sudo chmod +x %s" % target
+    
     if verbose:
         print cmd
+
     SSH_exec_cmd(identity_file, user, host, cmd, verbose)
 
 # Execute a remote SSH cmd with identity file (private SSH key), user, host
@@ -267,14 +325,19 @@ def _byteify(data, ignore_dicts = False):
     return data
 
 def exec_cmd_local(execmd, supressWarning = False):
+
     if supressWarning:
         cmd += " 2>/dev/null"
+
     if verbose:
         print execmd
+
     try:
         output = subprocess.check_output( execmd, shell=True )
     except subprocess.CalledProcessError as e:
         output = "Return code: " + str(e.returncode) + ", output: " + e.output.strip()
+    
+    Logger().cmd(execmd)
     # print output
     return output
     
@@ -333,14 +396,17 @@ def SSH_exec_cmd_with_directory( identity_file, user, host, srcdir, cmd, supress
 def SSH_exec_script( identity_file, user, host, script, supressWarning = False, removeAfterExecution = True):
     tmpfile = os.path.join("/tmp", str(uuid.uuid4())+".sh")
     scp( identity_file, script, tmpfile, user, host)
+
     cmd = "bash --verbose "+tmpfile
     dstcmd = ""
     if supressWarning:
         dstcmd += cmd + " 2>/dev/null; "
     else:
         dstcmd += cmd + "; "
+
     if removeAfterExecution:
         dstcmd += "rm -r " + tmpfile + "; "
+
     SSH_exec_cmd( identity_file, user, host, dstcmd,False )
 
 
@@ -551,4 +617,3 @@ def mergeDict(configDst, configSrc, bOverwrite):
                 configDst[entry] = configSrc[entry]
         elif isinstance(configSrc[entry], dict) and isinstance(configDst[entry], dict):
             mergeDict(configDst[entry], configSrc[entry], bOverwrite)
-

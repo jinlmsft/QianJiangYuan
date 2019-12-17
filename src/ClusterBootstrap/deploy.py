@@ -18,6 +18,8 @@ import glob
 import copy
 import numbers
 import multiprocessing
+import pdb 
+import logging
 
 from os.path import expanduser
 
@@ -45,6 +47,8 @@ import acs_tools
 
 from params import default_config_parameters, scriptblocks
 from ConfigUtils import *
+from MyLogger import get_deploy_logger as Logger
+
 
 capacityMatch = re.compile("\d+\.?\d*\s*[K|M|G|T|P]B")
 digitsMatch = re.compile("\d+\.?\d*")
@@ -58,8 +62,6 @@ coreosbaseurl = ""
 verbose = False
 nocache = False
 limitnodes = None
-
-
 
 # default search for all partitions of hdb, hdc, hdd, and sdb, sdc, sdd
 
@@ -149,6 +151,7 @@ def _check_config_items(cnfitem, cnf):
 def check_config(cnf):
     if not config["isacs"]:
         _check_config_items("discovery_url",cnf)
+
     _check_config_items("kubernetes_master_node",cnf)
     _check_config_items("kubernetes_master_ssh_user",cnf)
     _check_config_items("api_servers",cnf)
@@ -158,6 +161,7 @@ def check_config(cnf):
     _check_config_items("ssh_cert",cnf)
     _check_config_items("pod_ip_range",cnf)
     _check_config_items("service_cluster_ip_range",cnf)
+
     if not os.path.isfile(config["ssh_cert"]):
         raise Exception("ERROR: we cannot find ssh key file at %s. \n please run 'python build-pxe-coreos.py docker_image_name' to generate ssh key file and pxe server image." % config["ssh_cert"]) 
 
@@ -268,6 +272,7 @@ def update_config():
 
 def add_ssh_key():
     keys = fetch_config(config, ["sshKeys"])
+
     if isinstance( keys, list ):
         if "sshkey" in config and "sshKeys" in config and not (config["sshkey"] in config["sshKeys"]):
             config["sshKeys"].append(config["sshkey"])
@@ -726,35 +731,65 @@ def gen_worker_certificates():
 def gen_master_certificates():
 
     GetCertificateProperty()
+    utils.render_template_directory("./template/ssl", "./deploy/ssl", config)
 
-    utils.render_template_directory("./template/ssl", "./deploy/ssl",config)
-    os.system("cd ./deploy/ssl && bash ./gencerts_master.sh")
-    os.system("cd ./deploy/ssl && bash ./gencerts_aggregator.sh")
+    cmd = "cd ./deploy/ssl && bash ./gencerts_master.sh"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "cd ./deploy/ssl && bash ./gencerts_aggregator.sh"
+    os.system(cmd)
+    Logger().cmd(cmd)
 
 
 def gen_ETCD_certificates():
 
     GetCertificateProperty()
     utils.render_template_directory("./template/ssl", "./deploy/ssl",config)
-    os.system("cd ./deploy/ssl && bash ./gencerts_etcd.sh")
 
+    cmd = "cd ./deploy/ssl && bash ./gencerts_etcd.sh"
+    os.system(cmd)
+    Logger().cmd(cmd)
 
+def rm_deploy_configs():
+    cmd = "mkdir -p ./deploy/etcd"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "mkdir -p ./deploy/kube-addons"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "mkdir -p ./deploy/master"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "rm -r ./deploy/etcd"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "rm -r ./deploy/kube-addons"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "rm -r ./deploy/master"
+    os.system(cmd)
+    Logger().cmd(cmd)
+    return
 
 def gen_configs():
     print "==============================================="
     print "generating configuration files..."
+    
     utils.clean_rendered_target_directory()
-    os.system("mkdir -p ./deploy/etcd")
-    os.system("mkdir -p ./deploy/kube-addons")
-    os.system("mkdir -p ./deploy/master")
-    os.system("rm -r ./deploy/etcd")
-    os.system("rm -r ./deploy/kube-addons")
-    os.system("rm -r ./deploy/master")
+    rm_deploy_configs()
 
     deployDirs = ["deploy/etcd","deploy/kubelet","deploy/master","deploy/web-docker/kubelet","deploy/kube-addons","deploy/bin"]
     for deployDir in deployDirs:
         if not os.path.exists(deployDir):
-            os.system("mkdir -p %s" % (deployDir))
+            cmd = "mkdir -p %s" % (deployDir)
+            os.system(cmd)
+            Logger().cmd(cmd)
 
     if "etcd_node" in config:
         etcd_servers = config["etcd_node"]
@@ -783,17 +818,13 @@ def gen_configs():
     config["api_servers"] = "https://"+config["kubernetes_master_node"][0]+":"+str(config["k8sAPIport"])
     config["etcd_endpoints"] = ",".join(["https://"+x+":"+config["etcd3port1"] for x in config["etcd_node"]])
 
-
- 
-
     if os.path.isfile(config["ssh_cert"]+".pub"):
         f = open(config["ssh_cert"]+".pub")
         sshkey_public = f.read()
         f.close()
-
         config["sshkey"] = sshkey_public
-    add_ssh_key()
 
+    add_ssh_key()
     check_config(config)
 
     utils.render_template_directory("./template/etcd", "./deploy/etcd",config)
@@ -875,12 +906,17 @@ def deploy_master(kubernetes_master):
         utils.SSH_exec_script(config["ssh_cert"],kubernetes_master_user, kubernetes_master, "./deploy/master/" + config["postmasterdeploymentscript"])
 
 def get_cni_binary():
-    os.system("mkdir -p ./deploy/bin")
+    cmd = "mkdir -p ./deploy/bin"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
     # urllib.urlretrieve ("http://ccsdatarepo.westus.cloudapp.azure.com/data/containernetworking/cni-amd64-v0.5.2.tgz", "./deploy/bin/cni-amd64-v0.5.2.tgz")
     if verbose:
         print "Extracting CNI binaries"
-    os.system("tar -zxvf ./deploy/bin/cni-amd64-v0.5.2.tgz -C ./deploy/bin")
-
+    
+    cmd = "tar -zxvf ./deploy/bin/cni-amd64-v0.5.2.tgz -C ./deploy/bin"
+    os.system(cmd)
+    Logger().cmd(cmd)
 
 def get_kubectl_binary(force = False):
     get_hyperkube_docker(force = force)
@@ -891,17 +927,24 @@ def get_kubectl_binary(force = False):
     get_cni_binary()
 
 def get_hyperkube_docker(force = False) :
-    os.system("mkdir -p ./deploy/bin")
+    cmd = "mkdir -p ./deploy/bin"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
     print( "Use docker container %s" % config["dockers"]["container"]["hyperkube"]["fullname"])
     if force or not os.path.exists("./deploy/bin/hyperkube"):
         copy_from_docker_image(config["dockers"]["container"]["hyperkube"]["fullname"], "/hyperkube", "./deploy/bin/hyperkube")
+    
     if force or not os.path.exists("./deploy/bin/kubelet"):
         copy_from_docker_image(config["dockers"]["container"]["hyperkube"]["fullname"], "/kubelet", "./deploy/bin/kubelet")
+    
     if force or not os.path.exists("./deploy/bin/kubectl"):
         copy_from_docker_image(config["dockers"]["container"]["hyperkube"]["fullname"], "/kubectl", "./deploy/bin/kubectl")		
+    
     if config['kube_custom_cri']:
         if force or not os.path.exists("./deploy/bin/crishim"):
             copy_from_docker_image(config["dockers"]["container"]["hyperkube"]["fullname"], "/crishim", "./deploy/bin/crishim")
+        
         if force or not os.path.exists("./deploy/bin/nvidiagpuplugin.so"):
             copy_from_docker_image(config["dockers"]["container"]["hyperkube"]["fullname"], "/nvidiagpuplugin.so", "./deploy/bin/nvidiagpuplugin.so")
 
@@ -916,13 +959,14 @@ def deploy_masters(force = False):
     kubernetes_masters = config["kubernetes_master_node"]
     kubernetes_master_user = config["kubernetes_master_ssh_user"]
 
-
     utils.render_template_directory("./template/master", "./deploy/master",config)
     utils.render_template_directory("./template/kube-addons", "./deploy/kube-addons",config)
     #temporary hard-coding, will be fixed after refactoring of config/render logic
     config["restapi"] = "http://%s:%s" %  (kubernetes_masters[0],config["restfulapiport"])
+
     if verbose:
         print( "Restapi information == %s " % config["restapi"])
+
     utils.render_template_directory("./template/WebUI", "./deploy/WebUI",config)
     utils.render_template_directory("./template/RestfulAPI", "./deploy/RestfulAPI",config)
     render_service_templates()
@@ -931,6 +975,7 @@ def deploy_masters(force = False):
 
     for i,kubernetes_master in enumerate(kubernetes_masters):
         deploy_master(kubernetes_master)
+
     deploycmd = """
         until curl -q http://127.0.0.1:8080/version/ ; do 
             sleep 5; 
@@ -983,10 +1028,17 @@ def check_etcd_service():
     print "waiting for ETCD service is ready..."
     etcd_servers = config["etcd_node"]
     cmd = "curl --cacert %s --cert %s --key %s 'https://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", etcd_servers[0], config["etcd3port1"])
+    
+    ## modify from https to http
+    #cmd = "curl --cacert %s --cert %s --key %s 'http://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", etcd_servers[0], config["etcd3port1"])
+    Logger().cmd(cmd)
+
     if verbose:
         print cmd
+
     while os.system(cmd) != 0:
         time.sleep(5)
+
     print "ETCD service is ready to use..."
 
 
@@ -1021,7 +1073,6 @@ def deploy_ETCD_docker():
 
     print "==============================================="
     print "init etcd service on %s ..."  % etcd_servers[0]
-
 
     check_etcd_service()
 
@@ -1077,16 +1128,38 @@ def deploy_ETCD():
     print "==============================================="
     print "init etcd service on %s ..."  % etcd_servers[0]
 
+    #get_etcd_server_ip_cmd = ("getent hosts %s | awk '{ print $1 }'") % (etcd_servers[0])
+    #ips = utils.exec_cmd_local(get_etcd_server_ip_cmd).splitlines()
+    #print ips
+
+   
+    ## temporily modify from https to http
+    #cmd = "curl --cacert %s --cert %s --key %s 'http://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", etcd_servers[0], config["etcd3port1"])        
+
+    '''
+    if len(ips) > 0:
+        ip = ips[0]
+        ip = "192.168.255.1"
+        cmd = "curl --cacert %s --cert %s --key %s 'https://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", ip, config["etcd3port1"])
+    else:
+        cmd = "curl --cacert %s --cert %s --key %s 'https://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", etcd_servers[0], config["etcd3port1"])        
+    '''
 
     print "waiting for ETCD service is ready..."
-    cmd = "curl --cacert %s --cert %s --key %s 'https://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", etcd_servers[0], config["etcd3port1"])
+    cmd = "curl --cacert %s --cert %s --key %s 'https://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", etcd_servers[0], config["etcd3port1"])        
+
+	##cmd = "curl --cacert %s --cert %s --key %s 'https://%s:%s/v2/keys'" % ("./deploy/ssl/etcd/ca.pem","./deploy/ssl/etcd/etcd.pem","./deploy/ssl/etcd/etcd-key.pem", 
+    ##    etcd_servers[0], config["etcd3port1"])
+
+    if verbose:
+        print cmd
+
+    Logger().cmd(cmd)
     while os.system(cmd) != 0:
         print "ETCD service is NOT ready, waiting for 5 seconds..."
         time.sleep(5)
+
     print "ETCD service is ready to use..."
-
-
-
     utils.render_template("./template/etcd/init_network.sh","./deploy/etcd/init_network.sh",config)
     utils.SSH_exec_script( config["ssh_cert"], etcd_server_user, etcd_servers[0], "./deploy/etcd/init_network.sh")
 
@@ -1284,7 +1357,9 @@ def deploy_restful_API_on_node(ipAddress):
         config["nfs-server"] = "10.196.44.241:/mnt/data"
 
     if not os.path.exists("./deploy/RestfulAPI"):
-        os.system("mkdir -p ./deploy/RestfulAPI")
+        cmd = "mkdir -p ./deploy/RestfulAPI"
+        os.system(cmd)
+        Logger().cmd(cmd)
 
     utils.render_template("./template/RestfulAPI/config.yaml","./deploy/RestfulAPI/config.yaml",config)
     utils.render_template("./template/master/restapi-kubeconfig.yaml","./deploy/master/restapi-kubeconfig.yaml",config)
@@ -1306,8 +1381,12 @@ def deploy_restful_API_on_node(ipAddress):
     print "==============================================="
     print "restful api is running at: http://%s:%s" % (masterIP,config["restfulapiport"])
     config["restapi"] = "http://%s:%s" %  (masterIP,config["restfulapiport"])
+
     if verbose:
         print("Restapi === %s" % config["restapi"])
+
+    return
+
 
 def deploy_webUI_on_node(ipAddress):
 
@@ -1320,12 +1399,18 @@ def deploy_webUI_on_node(ipAddress):
         return
 
     if not os.path.exists("./deploy/WebUI"):
-        os.system("mkdir -p ./deploy/WebUI")
+        cmd = "mkdir -p ./deploy/WebUI"
+        os.system(cmd)
+        Logger().cmd(cmd)
+
     if verbose:
         print("Configuration == %s" % config)
 
     utils.render_template_directory("./template/WebUI","./deploy/WebUI", config)
-    os.system("cp --verbose ./deploy/WebUI/*.json ../WebUI/dotnet/WebPortal/") # used for debugging, when deploy, it will be overwritten by mount from host, contains secret
+
+    cmd = "cp --verbose ./deploy/WebUI/*.json ../WebUI/dotnet/WebPortal/"
+    os.system(cmd) # used for debugging, when deploy, it will be overwritten by mount from host, contains secret
+    Logger().cmd(cmd)
 
     # write into host, mounted into container
     utils.sudo_scp(config["ssh_cert"],"./deploy/WebUI/userconfig.json","/etc/WebUI/userconfig.json", sshUser, webUIIP )
@@ -1348,25 +1433,30 @@ def deploy_webUI_on_node(ipAddress):
 
     with open("./deploy/WebUI/dashboardConfig.json","w") as fp:
         json.dump(reportConfig, fp)
-    os.system("cp --verbose ./deploy/WebUI/dashboardConfig.json ../WebUI/dotnet/WebPortal/")
+
+    cmd = "cp --verbose ./deploy/WebUI/dashboardConfig.json ../WebUI/dotnet/WebPortal/"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
     # write into host, mounted into container
     utils.sudo_scp(config["ssh_cert"],"./deploy/WebUI/dashboardConfig.json","/etc/WebUI/dashboardConfig.json", sshUser, webUIIP )
-
     utils.render_template("./template/WebUI/Master-Templates.json", "./deploy/WebUI/Master-Templates.json", config)
     #os.system("cp --verbose ./template/WebUI/Master-Templates.json ./deploy/WebUI/Master-Templates.json")
-    os.system("cp --verbose ./deploy/WebUI/Master-Templates.json ../WebUI/dotnet/WebPortal/Master-Templates.json")
+    
+    cmd = "cp --verbose ./deploy/WebUI/Master-Templates.json ../WebUI/dotnet/WebPortal/Master-Templates.json"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
     utils.sudo_scp(config["ssh_cert"],"./deploy/WebUI/Master-Templates.json","/etc/WebUI/Master-Templates.json", sshUser, webUIIP )
-
-
-
     utils.render_template_directory("./template/RestfulAPI", "./deploy/RestfulAPI",config)
     utils.sudo_scp(config["ssh_cert"],"./deploy/RestfulAPI/config.yaml","/etc/RestfulAPI/config.yaml", sshUser, webUIIP )
 
-
     # utils.SSH_exec_cmd(config["ssh_cert"], sshUser, webUIIP, "docker pull %s ; docker rm -f webui ; docker run -d -p %s:80 -v /etc/WebUI:/WebUI --restart always --name webui %s ;" % (dockername,str(config["webuiport"]),dockername))
-
     print "==============================================="
     print "Web UI is running at: http://%s:%s" % (webUIIP,str(config["webuiport"]))
+
+    return
+
 
 # Install ssh key remotely
 def install_ssh_key(key_files):
@@ -1791,16 +1881,22 @@ def config_fqdn():
         utils.SSH_exec_cmd(config["ssh_cert"], config["admin_username"], node, remotecmd)    
 
 def add_service_config():
+
     if os.path.exists("deploy/etc/nginx/"):
-        os.system("cp deploy/etc/nginx/* deploy/services/nginx/")
+        cmd = "cp deploy/etc/nginx/* deploy/services/nginx/"
+        os.system(cmd)
+        Logger().cmd(cmd)
 
 
 def config_nginx():
     all_nodes = get_nodes(config["clusterId"])
+
     template_dir = "services/nginx/"
     target_dir = "deploy/services/nginx/"
+
     utils.render_template_directory(template_dir, target_dir,config)
     add_service_config()
+
     for node in all_nodes:   
         utils.sudo_scp(config["ssh_cert"],"./deploy/services/nginx/","/etc/nginx/conf.other", config["admin_username"], node )
     # See https://github.com/kubernetes/examples/blob/master/staging/https-nginx/README.md
@@ -2610,22 +2706,31 @@ def deploy_ETCD_master(force = False):
         if "etcd_node" in config and len(config["etcd_node"]) >= int(config["etcd_node_num"]) and "kubernetes_master_node" in config and len(config["kubernetes_master_node"]) >= 1:
             print "Ready to deploy kubernetes master on %s, etcd cluster on %s.  " % (",".join(config["kubernetes_master_node"]), ",".join(config["etcd_node"]))
             gen_configs()
+
             response = raw_input_with_default("Clean Up master, and deploy ETCD Nodes (y/n)?")
             if first_char(response) == "y":
                 clean_master()
                 gen_ETCD_certificates()
                 deploy_ETCD()
+
             response = raw_input_with_default("Deploy Master Nodes (y/n)?")
             if first_char(response) == "y":
                 gen_master_certificates()
                 deploy_masters(force)
 
             response = raw_input_with_default("Allow Workers to register (y/n)?")
-            if first_char(response) == "y":
 
-                urllib.urlretrieve (config["homeinserver"]+"/SetClusterInfo?clusterId=%s&key=etcd_endpoints&value=%s" %  (config["clusterId"],config["etcd_endpoints"]))
-                urllib.urlretrieve (config["homeinserver"]+"/SetClusterInfo?clusterId=%s&key=api_server&value=%s" % (config["clusterId"],config["api_servers"]))
+            if first_char(response) == "y":
+                cmd = config["homeinserver"]+"/SetClusterInfo?clusterId=%s&key=etcd_endpoints&value=%s" %  (config["clusterId"],config["etcd_endpoints"])
+                urllib.urlretrieve (cmd)
+                write_log("curl " + cmd)
+
+                cmd = config["homeinserver"]+"/SetClusterInfo?clusterId=%s&key=api_server&value=%s" % (config["clusterId"],config["api_servers"])
+                urllib.urlretrieve (cmd)
+                write_log("curl " + cmd)
+
                 return True
+
             return False
 
 #            response = raw_input_with_default("Create ISO file for deployment (y/n)?")
@@ -2652,15 +2757,20 @@ def update_config_nodes():
 def run_kube( prog, commands ):
     one_command = " ".join(commands)
     kube_command = ""
+
     if (config["isacs"]):
         kube_command = "%s --kubeconfig=./deploy/%s %s" % (prog, config["acskubeconfig"], one_command)
     else:
         nodes = get_ETCD_master_nodes(config["clusterId"])
         master_node = random.choice(nodes)
         kube_command = ("%s --server=https://%s:%s --certificate-authority=%s --client-key=%s --client-certificate=%s %s" % (prog, master_node, config["k8sAPIport"], "./deploy/ssl/ca/ca.pem", "./deploy/ssl/kubelet/apiserver-key.pem", "./deploy/ssl/kubelet/apiserver.pem", one_command) )
+    
     if verbose:
         print kube_command
+
     os.system(kube_command)
+    write_log(kube_command)
+    return
 
 def run_kubectl( commands ):
     run_kube( "./deploy/bin/kubectl", commands)
@@ -2744,15 +2854,19 @@ def get_service_name(service_config_file):
             return None
 
 def get_service_yaml( use_service ):
+
     servicedic = get_all_services()
     #print    servicedic
     newentries = {}
+
     for service in servicedic:
         servicename = get_service_name(servicedic[service])
         newentries[servicename] = servicedic[service]
+
     servicedic.update(newentries)
     #print servicedic
     fname = servicedic[use_service]
+
     return fname
 
 def kubernetes_label_node(cmdoptions, nodename, label):
@@ -2891,8 +3005,11 @@ def start_kube_service( servicename ):
     fname = get_service_yaml( servicename )
     # print "start service %s with %s" % (servicename, fname)
     dirname = os.path.dirname(fname)
+
     if os.path.exists(os.path.join(dirname,"launch_order")) and "/" not in servicename:
+
         with open(os.path.join(dirname,"launch_order"),'r') as f:
+
             allservices = f.readlines()
             for filename in allservices:
                 # If this line is a sleep tag (e.g. SLEEP 10), sleep for given seconds to wait for the previous service to start.
@@ -2901,20 +3018,26 @@ def start_kube_service( servicename ):
                 else:
                     filename = filename.strip('\n')
                     start_one_kube_service(os.path.join(dirname,filename))
+
     else:
         start_one_kube_service(fname)
+
+    return
 
 def stop_kube_service( servicename ):
     fname = get_service_yaml( servicename )
     dirname = os.path.dirname(fname)
+
     if os.path.exists(os.path.join(dirname,"launch_order")) and "/" not in servicename:
         with open(os.path.join(dirname,"launch_order"),'r') as f:
+
             allservices = f.readlines()
             for filename in reversed(allservices):
                 # If this line is a sleep tag, skip this line.
                 if not filename.startswith("SLEEP"):
                     filename = filename.strip('\n')
                     stop_one_kube_service(os.path.join(dirname,filename))
+
     else:
         stop_one_kube_service(fname)
 
@@ -2957,6 +3080,7 @@ def push_docker_images(nargs):
     if verbose:
         print "Build & push docker images to docker register  ..."
         print "Nocache: {0}".format(nocache)
+
     push_dockers("./deploy/docker-images/", config["dockerprefix"], config["dockertag"], nargs, config, verbose, nocache = nocache )
 
 def check_buildable_images(nargs):
@@ -2984,6 +3108,7 @@ def run_docker_image( imagename, native = False, sudo = False ):
             os.system( "docker run --rm -ti " + matches[0] )
         else:
             run_docker( matches[0], prompt = imagename, dockerConfig = dockerConfig, sudo = sudo )
+
 
 def run_command( args, command, nargs, parser ):
     # If necessary, show parsed arguments. 
@@ -3029,6 +3154,7 @@ def run_command( args, command, nargs, parser ):
     f = open(config_file)
     merge_config(config, yaml.load(f))
     f.close()
+
     # print config
     if os.path.exists("./deploy/clusterID.yml"):
         f = open("./deploy/clusterID.yml")
@@ -3514,34 +3640,45 @@ def run_command( args, command, nargs, parser ):
 
     elif command == "kubernetes":
         configuration( config, verbose )
+        #pdb.set_trace()
+
         if len(nargs) >= 1: 
+
             if len(nargs)>=2:
                 servicenames = nargs[1:]
+
             else:
                 allservices = get_all_services()
                 servicenames = []
                 for service in allservices:
                     servicenames.append(service)
                 # print servicenames
+
             generate_hdfs_containermounts()
             configuration( config, verbose )
+
             if nargs[0] == "start":
                 if args.force and "hdfsformat" in servicenames:
                     print ("This operation will WIPEOUT HDFS namenode, and erase all data on the HDFS cluster,  "  )
                     response = raw_input ("Please type (WIPEOUT) in ALL CAPITALS to confirm the operation ---> ")
+
                     if response == "WIPEOUT":
                         config["hdfsconfig"]["formatoptions"] = "--force "
+
                 # Start a kubelet service. 
                 for servicename in servicenames:
                     start_kube_service(servicename)
+
             elif nargs[0] == "stop":
                 # stop a kubelet service.
                 for servicename in servicenames:
                     stop_kube_service(servicename)
+
             elif nargs[0] == "restart":
                 # restart a kubelet service.
                 for servicename in servicenames:
                     replace_kube_service(servicename)
+
             elif nargs[0] == "labels":
                 if len(nargs)>=2 and ( nargs[1] == "active" or nargs[1] == "inactive" or nargs[1] == "remove" ):
                     kubernetes_label_nodes(nargs[1], nargs[2:], args.yes)
@@ -3550,6 +3687,7 @@ def run_command( args, command, nargs, parser ):
                 else:
                     parser.print_help()
                     print "Error: kubernetes labels expect a verb which is either active, inactive or remove, but get: %s" % nargs[1]
+
             elif nargs[0] == "patchprovider":
                 # TODO(harry): read a tag to decide which tools we are using, so we don't need nargs[1]
                 if len(nargs)>=2 and ( nargs[1] == "aztools" or nargs[1] == "gstools" or nargs[1] == "awstools" ):
@@ -3559,12 +3697,16 @@ def run_command( args, command, nargs, parser ):
                         kubernetes_patch_nodes_provider(nargs[1], False)
                 else:
                     print "Error: kubernetes patchprovider expect a verb which is either aztools, gstools or awstools."
+
             elif nargs[0] == "mark":
                 kubernetes_mark_nodes( nargs[1:], True)
+
             elif nargs[0] == "unmark":
                 kubernetes_mark_nodes( nargs[1:], False)
+
             elif nargs[0] == "cordon" or nargs[0] == "uncordon":
                 run_kube_command_on_nodes(nargs)
+
             else:
                 parser.print_help()
                 print "Error: Unknown kubernetes subcommand " + nargs[0]
@@ -3611,14 +3753,18 @@ def run_command( args, command, nargs, parser ):
                 config_fqdn()
 
     elif command == "docker":
+
         if len(nargs)>=1:
             configuration( config, verbose )
+
             if nargs[0] == "build":
                 check_buildable_images(nargs[1:])
                 build_docker_images(nargs[1:])
+
             elif nargs[0] == "push":
                 check_buildable_images(nargs[1:])
                 push_docker_images(nargs[1:])
+
             elif nargs[0] == "run":
                 if len(nargs)>=2:
                     run_docker_image( nargs[1], args.native, sudo = args.sudo ) 
@@ -3827,7 +3973,9 @@ Command:
 
     if not os.path.exists("./deploy"):
         os.system("mkdir -p ./deploy")
+
     config = init_config(default_config_parameters)
+    Logger().init(command)
 
     if command == "scriptblocks":
         if nargs[0] in scriptblocks:

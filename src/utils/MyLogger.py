@@ -65,7 +65,7 @@ class DeployLogger:
             os.mkdir(log_dir)
 
         cmd_dir = "./logs/cmd/"
-        if path.exists(cmd_dir) is False and not cmd:
+        if path.exists(cmd_dir) is False and cmd:
             os.mkdir(cmd_dir)
 
         self.app_logger = self.setup_logger("app", log_dir + "app.log")

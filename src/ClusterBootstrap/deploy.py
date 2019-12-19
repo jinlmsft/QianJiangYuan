@@ -3962,12 +3962,15 @@ Command:
     parser.add_argument('nargs', nargs=argparse.REMAINDER, 
         help="Additional command argument", 
         )
+    
     args = parser.parse_args()
     command = args.command
     nargs = args.nargs
+
     if args.verbose:
         verbose = True
         utils.verbose = True
+    
     if args.nodes is not None:
         limitnodes = args.nodes
 

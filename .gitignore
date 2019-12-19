@@ -28,6 +28,7 @@ src/ClusterBootstrap/.nfs*
 src/ClusterBootstrap/iso-creator/mkimg.sh
 
 src/ClusterBootstrap/deploy_backup/*
+src/ClusterBootstrap/logs/*
 
 
 

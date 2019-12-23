@@ -421,10 +421,13 @@ def add_additional_cloud_config():
     # additional startup script to be added to report.sh
     translate_config_entry( config, ["coreos", "startupScripts"], "startupscripts", basestring )
 
+
 def init_deployment():
     gen_new_key = True
     regenerate_key = False
+
     if (os.path.exists("./deploy/clusterID.yml")):
+
         clusterID = utils.get_cluster_ID_from_file()
         response = raw_input_with_default("There is a cluster (ID:%s) deployment in './deploy', do you want to keep the existing ssh key and CA certificates (y/n)?" % clusterID)
         if first_char(response) == "n":
@@ -435,6 +438,7 @@ def init_deployment():
             gen_new_key = False
     else:
         create_cluster_id()
+
     if gen_new_key:
         utils.gen_SSH_key(regenerate_key)
         gen_CA_certificates()
@@ -459,8 +463,13 @@ def init_deployment():
     add_additional_cloud_config()
     add_kubelet_config()
 
-    os.system( "mkdir -p ./deploy/cloud-config/")
-    os.system( "mkdir -p ./deploy/iso-creator/")
+    cmd =  "mkdir -p ./deploy/cloud-config/"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd =  "mkdir -p ./deploy/iso-creator/"
+    os.system(cmd)
+    Logger().cmd(cmd)
 
     template_file = "./template/cloud-config/cloud-config-master.yml"
     target_file = "./deploy/cloud-config/cloud-config-master.yml"
@@ -489,19 +498,25 @@ def init_deployment():
 
     with open("./deploy/ssl/kubelet/apiserver.pem", 'r') as f:
         content = f.read()
+
     config["apiserver.pem"] = base64.b64encode(content)
     config["worker.pem"] = base64.b64encode(content)
 
     with open("./deploy/ssl/kubelet/apiserver-key.pem", 'r') as f:
         content = f.read()
+
     config["apiserver-key.pem"] = base64.b64encode(content)
     config["worker-key.pem"] = base64.b64encode(content)
 
     add_additional_cloud_config()
     add_kubelet_config()
+
     template_file = "./template/cloud-config/cloud-config-worker.yml"
     target_file = "./deploy/cloud-config/cloud-config-worker.yml"
     utils.render_template( template_file, target_file ,config)
+
+    return
+
 
 def check_node_availability(ipAddress):
     # print "Check node availability on: " + str(ipAddress)
@@ -685,7 +700,12 @@ def clean_deployment():
 
 def gen_CA_certificates():
     utils.render_template_directory("./template/ssl", "./deploy/ssl",config)
-    os.system("cd ./deploy/ssl && bash ./gencerts_ca.sh")
+
+    cmd = "cd ./deploy/ssl && bash ./gencerts_ca.sh"
+    os.system(cmd)
+    Logger().cmd(cmd)
+    return
+
 
 def GetCertificateProperty():
     masterips = []
@@ -722,11 +742,19 @@ def GetCertificateProperty():
 
     config["etcd_ssl_dns"] = "\n".join(["DNS."+str(i+5)+" = "+dns for i,dns in enumerate(etcddns)])
     config["etcd_ssl_ip"] = "IP.1 = 127.0.0.1\n" + "\n".join(["IP."+str(i+2)+" = "+ip for i,ip in enumerate(etcdips)])
+    return
+
 
 def gen_worker_certificates():
 
     utils.render_template_directory("./template/ssl", "./deploy/ssl",config)
-    os.system("cd ./deploy/ssl && bash ./gencerts_kubelet.sh")
+
+    cmd = "cd ./deploy/ssl && bash ./gencerts_kubelet.sh"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    return
+
 
 def gen_master_certificates():
 
@@ -1465,7 +1493,6 @@ def install_ssh_key(key_files):
     rootpasswdfile = "./deploy/sshkey/rootpasswd"
     rootuserfile = "./deploy/sshkey/rootuser"
 
-
     with open(rootpasswdfile, "r") as f:
         rootpasswd = f.read().strip()
         f.close()
@@ -1476,23 +1503,36 @@ def install_ssh_key(key_files):
             rootuser = f.read().strip()
             f.close()
 
-
     for node in all_nodes:
         if len(key_files)>0:
             for key_file in key_files:
                 print "Install key %s on %s" % (key_file, node)
-                os.system("""sshpass -f %s ssh-copy-id -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -i %s %s@%s""" %(rootpasswdfile, key_file, rootuser, node))
+
+                cmd = """sshpass -f %s ssh-copy-id -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -i %s %s@%s""" %(rootpasswdfile, key_file, rootuser, node)
+                os.system(cmd)
+                Logger().cmd(cmd)
+
         else:
             print "Install key %s on %s" % ("./deploy/sshkey/id_rsa.pub", node)
-            os.system("""sshpass -f %s ssh-copy-id -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -i ./deploy/sshkey/id_rsa.pub %s@%s""" %(rootpasswdfile, rootuser, node))
+            cmd = """sshpass -f %s ssh-copy-id -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -i ./deploy/sshkey/id_rsa.pub %s@%s""" %(rootpasswdfile, rootuser, node)
+            os.system(cmd)
+            Logger().cmd(cmd)
 
 
     if rootuser != config["admin_username"]:
-         for node in all_nodes:
-            os.system('sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo useradd -p %s -d /home/%s -m -s /bin/bash %s"' % (rootpasswdfile,rootuser, node, rootpasswd,config["admin_username"],config["admin_username"]))
-            os.system('sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo usermod -aG sudo %s"' % (rootpasswdfile,rootuser, node,config["admin_username"]))
-            os.system('sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo mkdir -p /home/%s/.ssh"' % (rootpasswdfile,rootuser, node, config["admin_username"]))
 
+        for node in all_nodes:
+            cmd = 'sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo useradd -p %s -d /home/%s -m -s /bin/bash %s"' % (rootpasswdfile,rootuser, node, rootpasswd,config["admin_username"],config["admin_username"])
+            os.system(cmd)
+            Logger().cmd(cmd)
+
+            cmd = 'sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo usermod -aG sudo %s"' % (rootpasswdfile,rootuser, node,config["admin_username"])
+            os.system(cmd)
+            Logger().cmd(cmd)
+
+            cmd = 'sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo mkdir -p /home/%s/.ssh"' % (rootpasswdfile,rootuser, node, config["admin_username"])
+            os.system(cmd)
+            Logger().cmd(cmd)
 
             if len(key_files)>0:
                 for key_file in key_files:
@@ -1500,20 +1540,34 @@ def install_ssh_key(key_files):
                     with open(key_file, "r") as f:
                         publicKey = f.read().strip()
                         f.close()
-                    os.system('sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "echo %s | sudo tee /home/%s/.ssh/authorized_keys"' % (rootpasswdfile,rootuser, node,publicKey,config["admin_username"]))
+
+                    cmd = 'sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "echo %s | sudo tee /home/%s/.ssh/authorized_keys"' % (rootpasswdfile,rootuser, node,publicKey,config["admin_username"])
+                    os.system(cmd)
+                    Logger().cmd(cmd)
 
             else:
                 print "Install key %s on %s" % ("./deploy/sshkey/id_rsa.pub", node)
                 with open("./deploy/sshkey/id_rsa.pub", "r") as f:
                     publicKey = f.read().strip()
                     f.close()
-                os.system('sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "echo %s | sudo tee /home/%s/.ssh/authorized_keys"' % (rootpasswdfile,rootuser, node,publicKey,config["admin_username"]))
 
-            os.system('sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo chown %s:%s -R /home/%s"' % (rootpasswdfile,rootuser, node,config["admin_username"],config["admin_username"],config["admin_username"]))
-            os.system('sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo chmod 400 /home/%s/.ssh/authorized_keys"' % (rootpasswdfile,rootuser, node,config["admin_username"]))
-            os.system("""sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "echo '%s ALL=(ALL) NOPASSWD: ALL' | sudo tee -a /etc/sudoers.d/%s " """ % (rootpasswdfile,rootuser, node,config["admin_username"],config["admin_username"]))
+                cmd = 'sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "echo %s | sudo tee /home/%s/.ssh/authorized_keys"' % (rootpasswdfile,rootuser, node,publicKey,config["admin_username"])
+                os.system(cmd)
+                Logger().cmd(cmd)
 
+            cmd = 'sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo chown %s:%s -R /home/%s"' % (rootpasswdfile,rootuser, node,config["admin_username"],config["admin_username"],config["admin_username"])
+            os.system(cmd)
+            Logger().cmd(cmd)
 
+            cmd = 'sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "sudo chmod 400 /home/%s/.ssh/authorized_keys"' % (rootpasswdfile,rootuser, node,config["admin_username"])
+            os.system(cmd)
+            Logger().cmd(cmd)
+
+            cmd = """sshpass -f %s ssh  -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" %s@%s "echo '%s ALL=(ALL) NOPASSWD: ALL' | sudo tee -a /etc/sudoers.d/%s " """ % (rootpasswdfile,rootuser, node,config["admin_username"],config["admin_username"])
+            os.system(cmd)
+            Logger().cmd(cmd)
+
+    return
 
 def pick_server( nodelists, curNode ):
     if curNode is None or not (curNode in nodelists):
@@ -2723,11 +2777,11 @@ def deploy_ETCD_master(force = False):
             if first_char(response) == "y":
                 cmd = config["homeinserver"]+"/SetClusterInfo?clusterId=%s&key=etcd_endpoints&value=%s" %  (config["clusterId"],config["etcd_endpoints"])
                 urllib.urlretrieve (cmd)
-                write_log("curl " + cmd)
+                Logger().cmd("curl " + cmd)
 
                 cmd = config["homeinserver"]+"/SetClusterInfo?clusterId=%s&key=api_server&value=%s" % (config["clusterId"],config["api_servers"])
                 urllib.urlretrieve (cmd)
-                write_log("curl " + cmd)
+                Logger().cmd("curl " + cmd)
 
                 return True
 
@@ -2769,7 +2823,7 @@ def run_kube( prog, commands ):
         print kube_command
 
     os.system(kube_command)
-    write_log(kube_command)
+    Logger().cmd(kube_command)
     return
 
 def run_kubectl( commands ):
@@ -3272,6 +3326,7 @@ def run_command( args, command, nargs, parser ):
 
     elif command == "build":
         configuration( config, verbose )
+
         if len(nargs) <=0:
             init_deployment()
 #            response = raw_input_with_default("Create ISO file for deployment (y/n)?")

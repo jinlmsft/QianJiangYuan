@@ -57,7 +57,7 @@ class DeployLogger:
         return
 
     def init(self, cmd=""):
-        self.formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', "%Y-%m-%d %H:%M:%S")
+        self.formatter = logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s', "%Y-%m-%d %H:%M:%S")
 
         ## 在当前目录下创建日志目录
         log_dir = "./logs/"
@@ -103,7 +103,7 @@ class DeployLogger:
     def cmd(self, msg):
 
         if self.cmd_logger is not None:
-            self.cmd_logger.info(msg)
+            self.cmd_logger.info(msg + "\n")
         
         return
 

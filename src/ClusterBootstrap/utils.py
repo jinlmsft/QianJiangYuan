@@ -457,23 +457,64 @@ def gen_SSH_key(regenerate_key):
             f.write("clusterId : %s" % clusterID)
         f.close()
 
+
+
 def execute_backup_and_encrypt(clusterName, fname, key):
     clusterID = get_cluster_ID_from_file()
+
     backupdir = "./deploy_backup/backup" 
-    os.system("mkdir -p %s/clusterID" % backupdir)
-    os.system("cp -r ./*.yaml %s" % backupdir)
-    os.system("cp -r ./deploy/sshkey %s/sshkey" % backupdir)
-    os.system("cp -r ./deploy/etc %s/etc" % backupdir)
-    os.system("cp -r ./deploy/ssl %s/ssl" % backupdir)
-    os.system("cp -r ./deploy/clusterID.yml %s/clusterID/" % backupdir)
+    
+    cmd = "mkdir -p %s/clusterID" % backupdir
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "cp -r ./*.yaml %s" % backupdir
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "cp -r ./deploy/sshkey %s/sshkey" % backupdir
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "cp -r ./deploy/etc %s/etc" % backupdir
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "cp -r ./deploy/ssl %s/ssl" % backupdir
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    cmd = "cp -r ./deploy/clusterID.yml %s/clusterID/" % backupdir
+    os.system(cmd)
+    Logger().cmd(cmd)
+    
+
     if os.path.exists("./deploy/acs_kubeclusterconfig"):
-        os.system("cp -r ./deploy/acs_kubeclusterconfig %s/" % backupdir)
-    os.system("tar -czvf %s.tar.gz %s" % (fname, backupdir))
+        cmd = "cp -r ./deploy/acs_kubeclusterconfig %s/" % backupdir
+        os.system(cmd)
+        Logger().cmd(cmd)
+    
+    cmd = "tar -czvf %s.tar.gz %s" % (fname, backupdir)
+    os.system(cmd)
+    Logger().cmd(cmd)
+
     if not key is None:
-        os.system("openssl enc -aes-256-cbc -k %s -in %s.tar.gz -out %s.tar.gz.enc" % (key, fname, fname) )
-        os.system("rm %s.tar.gz" % fname )
-    os.system("rm -rf ./deploy_backup/backup")
-        
+        cmd = "openssl enc -aes-256-cbc -k %s -in %s.tar.gz -out %s.tar.gz.enc" % (key, fname, fname) 
+        os.system(cmd)
+        Logger().cmd(cmd)
+
+        cmd = "rm %s.tar.gz" % fname 
+        os.system(cmd)
+        Logger().cmd(cmd)
+
+
+    cmd = "rm -rf ./deploy_backup/backup"
+    os.system(cmd)
+    Logger().cmd(cmd)
+
+    return
+
+
 def execute_restore_and_decrypt(fname, key):
     clusterID = get_cluster_ID_from_file()
     backupdir = "./deploy_backup/backup" 

@@ -1,3 +1,6 @@
+#!/usr/bin/python 
+# -*- coding: UTF-8 -*-
+
 import json
 import os
 import time
@@ -38,9 +41,10 @@ import logging.config
 nvidiaDriverPath = config["nvidiaDriverPath"] if "nvidiaDriverPath" in config else "/usr/local/cuda/lib64"
 
 
-
 def printlog(msg):
-    print "%s - %s" % (datetime.datetime.utcnow().strftime("%x %X"),msg)
+    log_data =  "%s - %s" % (datetime.datetime.utcnow().strftime("%x %X"), msg)
+    logging.info(log_data)
+    return
 
 def LoadJobParams(jobParamsJsonStr):
     return json.loads(jobParamsJsonStr)
@@ -48,33 +52,40 @@ def LoadJobParams(jobParamsJsonStr):
 def cmd_exec(cmdStr):
     try:
         output = subprocess.check_output(["bash","-c", cmdStr])
+        logging.info("bash -c " + cmdStr)
+        logging.info("output: " + output)
+
     except Exception as e:
         print e
         output = ""
+        logging.info(str(e))
+
     return output
-
-
-
-
 
 
 def SubmitJob(job):
     jobParams = json.loads(base64.b64decode(job["jobParams"]))
+
     if jobParams["jobtrainingtype"] == "RegularJob":
         SubmitRegularJob(job)
+
     elif jobParams["jobtrainingtype"] == "PSDistJob":
         SubmitPSDistJob(job)
+
+    return
 
 def CheckMountPoints(mplist, mp):
     ret = True
     for item in mplist:
         if item["name"] == mp["name"] or item["containerPath"] == mp["containerPath"] or item["hostPath"] == mp["hostPath"]:
             ret = False
+
     return ret
 
 def SubmitRegularJob(job):
     ret = {}
     dataHandler = DataHandler()
+    logging.info("start to submit regular job...")
 
     try:
         jobParams = json.loads(base64.b64decode(job["jobParams"]))
@@ -86,20 +97,21 @@ def SubmitRegularJob(job):
 
         if "jobPath" not in jobParams or len(jobParams["jobPath"].strip()) == 0: 
             dataHandler.SetJobError(jobParams["jobId"],"ERROR: job-path does not exist")
+            msg = "ERROR: job-path does not exist. jobid: %s" % (jobParams["jobId"])
+            logging.error(msg)
             return False
 
         if "workPath" not in jobParams or len(jobParams["workPath"].strip()) == 0: 
             dataHandler.SetJobError(jobParams["jobId"],"ERROR: work-path does not exist")
+
+            msg = "ERROR: work-path does not exist. jobid: %s" % (jobParams["jobId"])
+            logging.error(msg)
             return False
 
         #if "dataPath" not in jobParams or len(jobParams["dataPath"].strip()) == 0: 
         #    dataHandler.SetJobError(jobParams["jobId"],"ERROR: data-path does not exist")
         #    return False
-
-
-        jobPath,workPath,dataPath = GetStoragePath(jobParams["jobPath"],jobParams["workPath"],jobParams["dataPath"])
-
-
+        jobPath, workPath, dataPath = GetStoragePath(jobParams["jobPath"],jobParams["workPath"],jobParams["dataPath"])
         localJobPath = os.path.join(config["storage-mount-path"],jobPath)
 
         if not os.path.exists(localJobPath):
@@ -116,19 +128,28 @@ def SubmitRegularJob(job):
             
         if isinstance(jobParams["cmd"], basestring) and not jobParams["cmd"] == "":
             launchScriptPath = os.path.join(localJobPath,"launch-%s.sh" % jobParams["jobId"])
+
             with open(launchScriptPath, 'w') as f:
                 f.write("#!/bin/bash -x\n")
                 f.write(jobParams["cmd"] + "\n")
+
+                msg = "write cmd(%s) to file: %s" % (jobParams["cmd"], launchScriptPath)
+                logging.info(msg)
+
             f.close()    
             if "userId" in jobParams:
-                os.system("chown -R %s %s" % (jobParams["userId"], launchScriptPath))
-            jobParams["LaunchCMD"] = "[\"bash\", \"/job/launch-%s.sh\"]" % jobParams["jobId"]
+                cmd = "chown -R %s %s" % (jobParams["userId"], launchScriptPath)
+                os.system(cmd)
+                logging.info(cmd)
 
+            # todo: Pod启动后会执行shell脚本，需预先将shell脚本拷贝到Pod所在的节点机器的目录：
+            # 譬如：/dlwsdata/work/user-nanme/jobs/191225/6f81459e-42ea-447e-9380-f545da2517e9/ 
+            # Pod启动后，会将此目录挂载至/job/
+            # jobParams["LaunchCMD"] = "[\"bash\", \"/job/launch-%s.sh\"]" % jobParams["jobId"]
+            jobParams["LaunchCMD"] = "[\"/bin/sh\", \"-ec\", \"sleep 6000315360000\"]"
 
         jobParams["jobDescriptionPath"] = "jobfiles/" + time.strftime("%y%m%d") + "/" + jobParams["jobId"] + "/" + jobParams["jobId"] + ".yaml"
-
         jobParams["jobNameLabel"] = ''.join(e for e in jobParams["jobName"] if e.isalnum())
-
         ENV = Environment(loader=FileSystemLoader("/"))
 
         jobTempDir = os.path.join(config["root-path"],"Jobs_Templete")
@@ -139,12 +160,12 @@ def SubmitRegularJob(job):
         jobParams["hostdataPath"] = os.path.join(config["storage-mount-path"], dataPath)
         jobParams["nvidiaDriverPath"] = nvidiaDriverPath
 
-
         jobParams["userNameLabel"] = getAlias(jobParams["userName"])
         jobParams["rest-api"] = config["rest-api"]
 
         if "mountpoints" not in jobParams:
             jobParams["mountpoints"] = []
+
         for onemount in jobParams["mountpoints"]:
             onemount["name"] = onemount["containerPath"].replace("/","").replace(".","").replace("_","-")
 
@@ -170,22 +191,25 @@ def SubmitRegularJob(job):
         if CheckMountPoints(jobParams["mountpoints"],mp):
             jobParams["mountpoints"].append(mp)            
 
-
         jobParams["pod_ip_range"] = config["pod_ip_range"]
         if "usefreeflow" in config:
             jobParams["usefreeflow"] = config["usefreeflow"]
         else:
             jobParams["usefreeflow"] = False
 
-        print ("Render Job: %s" % jobParams)
-        jobDescriptionList = []
+        msg = ("Render Job: %s" % jobParams)
+        print (msg)
+        logging.info(msg)
 
+        jobDescriptionList = []
         pods = []
+
         if "hyperparametername" in jobParams and "hyperparameterstartvalue" in jobParams and "hyperparameterendvalue" in jobParams and "hyperparameterstep" in jobParams:
             i = int(jobParams["hyperparameterstartvalue"])
             end = int(jobParams["hyperparameterendvalue"])
             step = int(jobParams["hyperparameterstep"])
             c = 0
+
             while (i <= end):
                 pod = {}
                 pod["podName"] = jobParams["jobId"]+"-pod-"+str(c)
@@ -201,9 +225,8 @@ def SubmitRegularJob(job):
 
         if "env" not in jobParams:
             jobParams["env"] = []
+
         jobParams["commonenv"] = copy.copy(jobParams["env"])
-
-
         for pod in pods:
             jobParams["podName"] = pod["podName"]
             jobParams["env"] = jobParams["commonenv"] + pod["envs"]
@@ -255,30 +278,61 @@ def SubmitRegularJob(job):
                     jobParams["port-type"] = "TCP"
 
                     serviceTemplate = ENV.get_template(os.path.join(jobTempDir,"KubeSvc.yaml.template"))
-
                     stemplate = ENV.get_template(serviceTemplate)
                     interactiveMeta = stemplate.render(svc=jobParams)
                     jobDescriptionList.append(interactiveMeta)
 
-
         jobDescription = "\n---\n".join(jobDescriptionList)
-
         jobDescriptionPath = os.path.join(config["storage-mount-path"], jobParams["jobDescriptionPath"])
+
         if not os.path.exists(os.path.dirname(os.path.realpath(jobDescriptionPath))):
             os.makedirs(os.path.dirname(os.path.realpath(jobDescriptionPath)))
+
         if os.path.isfile(jobDescriptionPath):
             output = k8sUtils.kubectl_delete(jobDescriptionPath) 
+            logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
 
         with open(jobDescriptionPath, 'w') as f:
             f.write(jobDescription)
 
         output = k8sUtils.kubectl_create(jobDescriptionPath)    
-        logging.info("Submitted job %s to k8s, returned with status %s" %(job["jobId"], output))
+        logging.info("kubectl create " + jobDescriptionPath + " output: " + str(output))
+
+        msg = "Submitted job %s to k8s, returned with status %s" %(jobParams["jobId"], output)
+        logging.info(msg)
+
+        msg = "JobParams: \n" + json.dumps(jobParams)
+        logging.info(msg) 
+
+
+        ## 启动命令非空
+        if isinstance(jobParams["cmd"], basestring) and not jobParams["cmd"] == "":
+            ## 等待docker启动完毕，再执行文件拷贝指令
+            time.sleep(15) 
+            launch_file_name = "launch-%s.sh" % jobParams["jobId"]
+
+            # 将文件拷贝进podName:/tmp/
+            # /job/目录需要root权限才能操作，因此此处无法直接拷贝进/job/
+            remotecmd = "cp %s %s:%s" % (launchScriptPath, jobParams["podName"], "/tmp/")
+            output = k8sUtils.kubectl_exec(remotecmd)
+            logging.info("remotecmd[" + remotecmd + "]" + " output[" + str(output) + "]") 
+
+            # 添加执行权限：/tmp/lunach_jobid.sh
+            remotecmd = "exec %s -- bash -c \"chmod 777 /tmp/%s\"" % (jobParams["jobId"], launch_file_name)
+            output = k8sUtils.kubectl_exec(remotecmd)
+            logging.info("remotecmd[" + remotecmd + "]" + " output[" + str(output) + "]") 
+
+            # 执行/tmp/lunach_jobid.sh
+            remotecmd = "exec %s -- bash -c \"/tmp/%s\"" % (jobParams["jobId"], launch_file_name)
+            output = k8sUtils.kubectl_exec(remotecmd)
+            logging.info("remotecmd[" + remotecmd + "]" + " output[" + str(output) + "]") 
+
+        else:
+            pass
+
 
         ret["output"] = output
-        
         ret["jobId"] = jobParams["jobId"]
-
 
         if "userName" not in jobParams:
             jobParams["userName"] = ""
@@ -286,7 +340,6 @@ def SubmitRegularJob(job):
         dataHandler.UpdateJobTextField(jobParams["jobId"],"jobStatus","scheduling")
         dataHandler.UpdateJobTextField(jobParams["jobId"],"jobDescriptionPath",jobParams["jobDescriptionPath"])
         dataHandler.UpdateJobTextField(jobParams["jobId"],"jobDescription",base64.b64encode(jobDescription))
-
 
         jobMeta = {}
         jobMeta["jobDescriptionPath"] = jobParams["jobDescriptionPath"]
@@ -296,11 +349,16 @@ def SubmitRegularJob(job):
         jobMeta["LaunchCMD"] = jobParams["LaunchCMD"]
 
         jobMetaStr = base64.b64encode(json.dumps(jobMeta))
-        dataHandler.UpdateJobTextField(jobParams["jobId"],"jobMeta",jobMetaStr)
+        dataHandler.UpdateJobTextField(jobParams["jobId"],"jobMeta", jobMetaStr)
+
+        msg = "update job text field %s, returned with status" % (jobParams["jobId"])
+        logging.info(msg)
+
     except Exception as e:
         print e
         ret["error"] = str(e)
         retries = dataHandler.AddandGetJobRetries(jobParams["jobId"])
+
         if retries >= 5:
             dataHandler.UpdateJobTextField(jobParams["jobId"],"jobStatus","error")
             dataHandler.UpdateJobTextField(jobParams["jobId"],"errorMsg","Cannot submit job!" + str(e))
@@ -312,6 +370,7 @@ def SubmitRegularJob(job):
 def SubmitPSDistJob(job):
     ret = {}
     dataHandler = DataHandler()
+    logging.info("start to submit regular job...")
 
     try:
         jobParams = json.loads(base64.b64decode(job["jobParams"]))
@@ -320,11 +379,14 @@ def SubmitPSDistJob(job):
         distJobParams["ps"] = []
         distJobParams["worker"] = []
         assignedRack = None
+
         if len(config["racks"]) > 0:
             assignedRack = random.choice(config["racks"])
+
         if jobParams["jobtrainingtype"] == "PSDistJob":
             jobDescriptionList = []
             nums = {"ps":int(jobParams["numps"]),"worker":int(jobParams["numpsworker"])}
+
             for role in ["ps","worker"]:
                 for i in range(nums[role]):
                     distJobParam=copy.deepcopy(jobParams)
@@ -398,6 +460,7 @@ chmod +x /opt/run_dist_job.sh
                     launchScriptPath = os.path.join(localJobPath,"launch-%s.sh" % distJobParam["jobId"])
                     with open(launchScriptPath, 'w') as f:
                         f.write(launchCMD)
+
                     f.close()        
                     distJobParam["LaunchCMD"] = "[\"bash\", \"/job/launch-%s.sh\"]" % distJobParam["jobId"]
 
@@ -451,16 +514,18 @@ chmod +x /opt/run_dist_job.sh
         jobDescriptionPath = os.path.join(config["storage-mount-path"], jobParams["jobDescriptionPath"])
         if not os.path.exists(os.path.dirname(os.path.realpath(jobDescriptionPath))):
             os.makedirs(os.path.dirname(os.path.realpath(jobDescriptionPath)))
+
         if os.path.isfile(jobDescriptionPath):
             output = k8sUtils.kubectl_delete(jobDescriptionPath) 
+            logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
 
         with open(jobDescriptionPath, 'w') as f:
             f.write(jobDescription)
 
         output = k8sUtils.kubectl_create(jobDescriptionPath)    
+        logging.info("kubectl create " + jobDescriptionPath + " output: " + str(output))
 
         ret["output"] = output
-        
         ret["jobId"] = jobParams["jobId"]
 
 
@@ -482,6 +547,7 @@ chmod +x /opt/run_dist_job.sh
 
         jobMetaStr = base64.b64encode(json.dumps(jobMeta))
         dataHandler.UpdateJobTextField(jobParams["jobId"],"jobMeta",jobMetaStr)
+
     except Exception as e:
         print e
         ret["error"] = str(e)
@@ -496,15 +562,25 @@ def KillJob(job):
     dataHandler = DataHandler()
     result, detail = k8sUtils.GetJobStatus(job["jobId"])
     dataHandler.UpdateJobTextField(job["jobId"],"jobStatusDetail",base64.b64encode(json.dumps(detail)))
-    logging.info("Killing job %s, with status %s, %s" %(job["jobId"], result,detail))
+
+    msg = "Killing job %s, with status %s, %s" %(job["jobId"], result,detail)
+    logging.info(msg)
+
     if "jobDescriptionPath" in job and job["jobDescriptionPath"] is not None:
         jobDescriptionPath = os.path.join(config["storage-mount-path"], job["jobDescriptionPath"])
+
         if os.path.isfile(jobDescriptionPath):
-            if k8sUtils.kubectl_delete(jobDescriptionPath) == 0:
+
+            code = k8sUtils.kubectl_delete(jobDescriptionPath)
+            if  code == 0:
+                logging.info("kubectl delete " + jobDescriptionPath + " succ. output: 0")
                 dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","killed")
                 return True
+
             else:
                 dataHandler.UpdateJobTextField(job["jobId"],"errorMsg","Cannot delete job from Kubernetes Cluster!")
+                logging.info("kubectl delete " + jobDescriptionPath + " failed. output: " + str(code))
+                
     else:
         dataHandler.UpdateJobTextField(job["jobId"],"errorMsg","Cannot find job description file!")
 
@@ -523,20 +599,24 @@ def getAlias(username):
 
 
 def ApproveJob(job):
+    logging.info("start to Approve job...")
+
     dataHandler = DataHandler()
     dataHandler.ApproveJob(job["jobId"])
     dataHandler.Close()
     return True
 
-
-
 def AutoApproveJob(job):
+
     cluster_status = get_cluster_status()
     jobUser = getAlias(job["userName"])
     jobParams = json.loads(base64.b64decode(job["jobParams"]))
     jobGPU = int(jobParams["resourcegpu"])
 
+    logging.info("start to autoApprove job...")
     currentGPU = 0
+    logging.info("currentGPU: " + str(currentGPU) + " jobGPU: " + str(jobGPU))
+
     for user in cluster_status["user_status"]:
         if user["userName"] == jobUser:
             currentGPU = int(user["userGPU"])
@@ -550,32 +630,36 @@ def AutoApproveJob(job):
 UnusualJobs = {}
 
 def UpdateJobStatus(job):
+
     dataHandler = DataHandler()
     jobParams = json.loads(base64.b64decode(job["jobParams"]))
-
+    logging.info("start to update job status...")
 
     if job["jobStatus"] == "scheduling" and jobParams["jobtrainingtype"] == "PSDistJob":
         launch_ps_dist_job(jobParams)
 
-
     jobPath,workPath,dataPath = GetStoragePath(jobParams["jobPath"],jobParams["workPath"],jobParams["dataPath"])
     localJobPath = os.path.join(config["storage-mount-path"],jobPath)
-    logPath = os.path.join(localJobPath,"logs/joblog.txt")
-    
+    logPath = os.path.join(localJobPath,"logs/joblog.txt")    
 
     result, detail = k8sUtils.GetJobStatus(job["jobId"])
     dataHandler.UpdateJobTextField(job["jobId"],"jobStatusDetail",base64.b64encode(json.dumps(detail)))
 
-    logging.info("job %s status: %s,%s" % (job["jobId"], result, json.dumps(detail)))
+    msg = "job %s status, result: %s, detail: %s" % (job["jobId"], result, json.dumps(detail))
+    logging.info(msg)
     
     jobDescriptionPath = os.path.join(config["storage-mount-path"], job["jobDescriptionPath"]) if "jobDescriptionPath" in job else None
+    
     if "userId" not in jobParams:
         jobParams["userId"]    = "0"
+
     if result.strip() == "Succeeded":
         joblog_manager.extract_job_log(job["jobId"],logPath,jobParams["userId"])
         dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","finished")
+
         if jobDescriptionPath is not None and os.path.isfile(jobDescriptionPath):
-            k8sUtils.kubectl_delete(jobDescriptionPath) 
+            output = k8sUtils.kubectl_delete(jobDescriptionPath) 
+            logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
 
     elif result.strip() == "Running":
         if job["jobStatus"] != "running":
@@ -591,24 +675,32 @@ def UpdateJobStatus(job):
         joblog_manager.extract_job_log(job["jobId"],logPath,jobParams["userId"])
         dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","failed")
         dataHandler.UpdateJobTextField(job["jobId"],"errorMsg",detail)
+
         if jobDescriptionPath is not None and os.path.isfile(jobDescriptionPath):
-            k8sUtils.kubectl_delete(jobDescriptionPath) 
+            output = k8sUtils.kubectl_delete(jobDescriptionPath) 
+            logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
 
     elif result.strip() == "Unknown":
         if job["jobId"] not in UnusualJobs:
             UnusualJobs[job["jobId"]] = datetime.datetime.now()
+
         elif (datetime.datetime.now() - UnusualJobs[job["jobId"]]).seconds > 300:
             del UnusualJobs[job["jobId"]]
+
             retries = dataHandler.AddandGetJobRetries(job["jobId"])
             if retries >= 5:
                 printlog("Job %s fails for more than 5 times, abort" % job["jobId"])
                 dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","error")
                 dataHandler.UpdateJobTextField(job["jobId"],"errorMsg","cannot launch the job.")
+
                 if jobDescriptionPath is not None and os.path.isfile(jobDescriptionPath):
-                    k8sUtils.kubectl_delete(jobDescriptionPath)                 
+                    output = k8sUtils.kubectl_delete(jobDescriptionPath)     
+                    logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
+
             else:
                 printlog("Job %s fails in Kubernetes, delete and re-submit the job. Retries %d" % (job["jobId"] , retries))
                 SubmitJob(job)
+
     elif result.strip() == "PendingHostPort":
         printlog("Cannot find host ports for job :%s, re-launch the job with different host ports " % (job["jobId"]))
     
@@ -632,14 +724,15 @@ def UpdateDistJobStatus(job):
     result, detail = k8sUtils.GetJobStatus(job["jobId"])
     dataHandler.UpdateJobTextField(job["jobId"],"jobStatusDetail",base64.b64encode(detail))
 
-    logging.info("job %s status: %s,%s" % (job["jobId"], result, json.dumps(detail)))
-    
+    msg = "job %s status. result: %s, detail: %s" % (job["jobId"], result, json.dumps(detail))
+    logging.info(msg)
     jobDescriptionPath = os.path.join(config["storage-mount-path"], job["jobDescriptionPath"]) if "jobDescriptionPath" in job else None
 
 
     jobId = jobParams["jobId"]
     workerPodInfo = k8sUtils.GetPod("distRole=worker,run=" + jobId)
     psPodInfo = k8sUtils.GetPod("distRole=ps,run=" + jobId)
+
     if "items" in workerPodInfo and len(workerPodInfo["items"]) == int(jobParams["numpsworker"]) and "items" in psPodInfo and len(psPodInfo["items"]) == int(jobParams["numps"]):
         if job["jobStatus"] == "scheduling" :
             launch_ps_dist_job(jobParams)
@@ -654,13 +747,17 @@ def UpdateDistJobStatus(job):
             if result.strip() == "Succeeded":
                 joblog_manager.extract_job_log(job["jobId"],logPath,jobParams["userId"])
                 dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","finished")
+
                 if jobDescriptionPath is not None and os.path.isfile(jobDescriptionPath):
-                    k8sUtils.kubectl_delete(jobDescriptionPath) 
+                    output = k8sUtils.kubectl_delete(jobDescriptionPath) 
+                    logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
 
             elif result.strip() == "Running":
                 joblog_manager.extract_job_log(job["jobId"],logPath,jobParams["userId"])
+
                 if job["jobStatus"] != "running":
                     dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","running")
+
                 if "interactivePort" in jobParams:
                     serviceAddress = k8sUtils.GetServiceAddress(job["jobId"])
                     serviceAddress = base64.b64encode(json.dumps(serviceAddress))
@@ -671,8 +768,10 @@ def UpdateDistJobStatus(job):
                 joblog_manager.extract_job_log(job["jobId"],logPath,jobParams["userId"])
                 dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","failed")
                 dataHandler.UpdateJobTextField(job["jobId"],"errorMsg",detail)
+
                 if jobDescriptionPath is not None and os.path.isfile(jobDescriptionPath):
-                    k8sUtils.kubectl_delete(jobDescriptionPath) 
+                    output = k8sUtils.kubectl_delete(jobDescriptionPath) 
+                    logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
 
             elif result.strip() == "Unknown":
                 if job["jobId"] not in UnusualJobs:
@@ -684,8 +783,11 @@ def UpdateDistJobStatus(job):
                         printlog("Job %s fails for more than 5 times, abort" % job["jobId"])
                         dataHandler.UpdateJobTextField(job["jobId"],"jobStatus","error")
                         dataHandler.UpdateJobTextField(job["jobId"],"errorMsg","cannot launch the job.")
+
                         if jobDescriptionPath is not None and os.path.isfile(jobDescriptionPath):
-                            k8sUtils.kubectl_delete(jobDescriptionPath)                 
+                            output = k8sUtils.kubectl_delete(jobDescriptionPath)               
+                            logging.info("kubectl delete " + jobDescriptionPath + " output: " + str(output))
+  
                     else:
                         printlog("Job %s fails in Kubernetes, delete and re-submit the job. Retries %d" % (job["jobId"] , retries))
                         SubmitJob(job)
@@ -696,13 +798,13 @@ def UpdateDistJobStatus(job):
     pass
 
 
-
-
 def run_dist_cmd_on_pod(podId, cmd, outputfile):
     remotecmd = "exec %s -- %s" % (podId,cmd)
     print remotecmd
-    k8sUtils.kubectl_exec_output_to_file(remotecmd,outputfile)
 
+    k8sUtils.kubectl_exec_output_to_file(remotecmd,outputfile)
+    logging.info("kubectl exec " + remotecmd)
+    return
 
 
 class Kube_RemoteCMD_Thread(threading.Thread):
@@ -720,8 +822,10 @@ def launch_ps_dist_job(jobParams):
     jobId = jobParams["jobId"]
     workerPodInfo = k8sUtils.GetPod("distRole=worker,run=" + jobId)
     psPodInfo = k8sUtils.GetPod("distRole=ps,run=" + jobId)
+
     if "items" in workerPodInfo and len(workerPodInfo["items"]) == int(jobParams["numpsworker"]) and "items" in psPodInfo and len(psPodInfo["items"]) == int(jobParams["numps"]):
         podStatus = [k8sUtils.check_pod_status(pod) for pod in  workerPodInfo["items"] + psPodInfo["items"] ]
+
         if all([status == "Running" for status in podStatus]):
             ps_pod_names = [pod["metadata"]["name"] for pod in psPodInfo["items"]]
             worker_pod_names = [pod["metadata"]["name"] for pod in workerPodInfo["items"]]
@@ -754,27 +858,43 @@ def launch_ps_dist_job(jobParams):
             for i in range(ps_num):
                 os.system("mkdir -p %s" % ps_files[i])
                 ps_files[i] = os.path.join(ps_files[i],"run_dist_job.sh")
+
                 with open(ps_files[i], 'w') as f:
                     f.write(ps_cmd[i] + "\n")
-                f.close()        
+
+                f.close()  
+
                 if "userId" in jobParams:
                     os.system("chown -R %s %s" % (jobParams["userId"], ps_files[i]))
+
                 remotecmd = "cp %s %s:/opt/run_dist_job.sh" % (ps_files[i],ps_pod_names[i])
-                k8sUtils.kubectl_exec(remotecmd)
-                k8sUtils.kubectl_exec("exec %s touch /opt/run_dist_job" % ps_pod_names[i])
+                output = k8sUtils.kubectl_exec(remotecmd)
+                logging.info("kubectl exec: " + remotecmd + " output: " + str(output))
+
+                remotecmd = "exec %s touch /opt/run_dist_job" % ps_pod_names[i]
+                output = k8sUtils.kubectl_exec(remotecmd)
+                logging.info("kubectl exec: " + remotecmd + " output: " + str(output))
 
 
             for i in range(worker_num):
                 os.system("mkdir -p %s" % worker_files[i])
                 worker_files[i] = os.path.join(worker_files[i],"run_dist_job.sh")
+
                 with open(worker_files[i], 'w') as f:
                     f.write(worker_cmd[i] + "\n")
+
                 f.close()    
                 if "userId" in jobParams:
                     os.system("chown -R %s %s" % (jobParams["userId"], worker_files[i]))
+
                 remotecmd = "cp %s %s:/opt/run_dist_job.sh" % (worker_files[i],worker_pod_names[i])
-                k8sUtils.kubectl_exec(remotecmd)
-                k8sUtils.kubectl_exec("exec %s touch /opt/run_dist_job" % worker_pod_names[i])
+                output = k8sUtils.kubectl_exec(remotecmd)
+                logging.info("kubectl exec: " + remotecmd + " output: " + str(output))
+
+                remotecmd = "exec %s touch /opt/run_dist_job" % worker_pod_names[i]
+                output = k8sUtils.kubectl_exec(remotecmd)
+                logging.info("kubectl exec: " + remotecmd + " output: " + str(output))
+
 
             dataHandler = DataHandler()
             dataHandler.UpdateJobTextField(jobParams["jobId"],"jobStatus","running")
@@ -802,8 +922,10 @@ def launch_ps_dist_job(jobParams):
 
 
 def create_log( logdir = '/var/log/dlworkspace' ):
+
     if not os.path.exists( logdir ):
         os.system("mkdir -p " + logdir )
+
     with open('logging.yaml') as f:
         logging_config = yaml.load(f)
         f.close()
@@ -812,32 +934,44 @@ def create_log( logdir = '/var/log/dlworkspace' ):
 
 
 def Run():
+    create_log()
+    logging.info("start to process jobs ...")
 
     while True:
 
         try:
             config["racks"] = k8sUtils.get_node_labels("rack")
             config["skus"] = k8sUtils.get_node_labels("sku")
+
         except Exception as e:
             print e
 
         try:
             dataHandler = DataHandler()
             pendingJobs = dataHandler.GetPendingJobs()
-            printlog("updating status for %d jobs" % len(pendingJobs))
+            #printlog("updating status for %d jobs" % len(pendingJobs))
+
             for job in pendingJobs:
                 try:
-                    print "Processing job: %s, status: %s" % (job["jobId"], job["jobStatus"])
+                    logging.info("to process one pendingJob.")
+                    msg = "Processing job: %s, status: %s" % (str(job["jobId"]), str(job["jobStatus"]))
+                    logging.info(msg)
+                    
                     if job["jobStatus"] == "queued":
                         SubmitJob(job)
+
                     elif job["jobStatus"] == "killing":
                         KillJob(job)
+
                     elif job["jobStatus"] == "scheduling" or job["jobStatus"] == "running" :
                         UpdateJobStatus(job)
+
                     elif job["jobStatus"] == "unapproved" :
                         AutoApproveJob(job)
+
                 except Exception as e:
                     print e
+
         except Exception as e:
             print e
 

@@ -27,6 +27,7 @@ import threading
 import random
 import pycurl
 from StringIO import StringIO
+import logging
 
 
 def curl_get(url):
@@ -47,44 +48,56 @@ def curl_get(url):
     curl.close()
     return responseStr
 
+
 def kubectl_create(jobfile,EXEC=True):
     if EXEC:
         try:
             output = subprocess.check_output(["bash","-c", config["kubelet-path"] + " create -f " + jobfile])
+
         except Exception as e:
             print e
             output = ""
+            logging.error(str(e))
+
     else:
         output = "Job " + jobfile + " is not submitted to kubernetes cluster"
+
     return output
+
 
 def kubectl_delete(jobfile,EXEC=True):
     if EXEC:
         try:
             cmd = "bash -c '" + config["kubelet-path"] + " delete -f " + jobfile + "'"
-            print cmd
             output = os.system(cmd)
+
         except Exception as e:
             print e
             output = -1
+            logging.error(str(e))
     else:
         output = -1
+
     return output
+
 
 def kubectl_exec(params):
     try:
         #print ("bash -c %s %s" % (config["kubelet-path"], params))
         output = subprocess.check_output(["bash","-c", config["kubelet-path"] + " " + params])
+
     except Exception as e:
         print "EXCEPTION: " + str(e)
         output = ""
+        logging.error(str(e))
+
     return output
 
 
 def kubectl_exec_output_to_file(params,file):
     os.system("%s %s 2>&1 | tee %s" % (config["kubelet-path"], params, file))
-
-
+    cmd = "%s %s 2>&1 | tee %s" % (config["kubelet-path"], params, file)
+    logging.info(cmd)
 
 
 def Split(text,spliter):
@@ -365,6 +378,7 @@ def get_node_labels(key):
                     if not v in ret:
                         ret.append(v)
     return ret
+
 if __name__ == '__main__':
     
     #Run()

@@ -141,4 +141,6 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT 1
 
 # CMD /bin/bash -c "service apache2 start && sleep infinity"
 
+RUN apt-get -y update &&  apt-get -y install xauth xfonts-base
+
 CMD /bin/bash -c /run.sh
